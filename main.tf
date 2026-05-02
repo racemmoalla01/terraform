@@ -27,4 +27,3 @@ resource "google_compute_instance" "vm" {
   }
 
 }
-racem
