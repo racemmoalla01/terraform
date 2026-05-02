@@ -7,7 +7,6 @@ resource "google_storage_bucket" "my-bucket" {
   uniform_bucket_level_access = true
 }
 
-
 resource "google_compute_instance" "vm" {
   name ="docker-vm"
   machine_type = "e2-micro"
