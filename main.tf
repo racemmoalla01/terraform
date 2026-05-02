@@ -1,13 +1,14 @@
-provider "google" { 
-  project = var.project_id
-  region = var.region
-  zone =var .zone
+resource "google_storage_bucket" "my-bucket" {
+  name          = "bkt-demo-000"
+  location      = "us-central1"
+  project = "tt-dev-001"
+  force_destroy = true
+  public_access_prevention = "enforced"
 }
 
 resource "google_compute_instance" "vm" {
   name ="docker-vm"
   machine_type = "e2-micro"
-  zone = var.zone
 
   boot_disk { 
     initialize_params {
