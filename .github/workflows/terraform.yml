@@ -70,18 +70,20 @@ jobs:
     - name: Install Ansible
       run: sudo apt-get update && sudo apt-get install -y ansible
 
-    - name: Create clean inventory
+    - name: Create inventory
       run: |
-        IP=$(terraform output -raw vm_ip | tr -d '\r\n')
+        RAW=$(terraform output vm_ip)
+        echo "RAW=$RAW"
 
-        echo "VM IP = $IP"
+        IP=$(echo "$RAW" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)
+
+        echo "CLEAN IP=$IP"
 
         rm -f inventory
 
         printf "[vm]\n%s ansible_user=ubuntu ansible_host=%s\n" "$IP" "$IP" > inventory
 
-        echo "=== INVENTORY ==="
+        echo "===== INVENTORY ====="
         cat inventory
-
     - name: Run Ansible
       run: ansible-playbook -i inventory playbook.yml
