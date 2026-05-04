@@ -72,8 +72,9 @@ jobs:
 
     - name: Create inventory
       run: |
+        IP=$(terraform output -raw vm_ip | tr -d '\r\n')
         echo "[vm]" > inventory
-        echo "${{ steps.ip.outputs.IP }} ansible_user=ubuntu" >> inventory
+        echo "$IP ansible_user=ubuntu ansible_host=$IP" >> inventory
 
     - name: Run Ansible
       run: ansible-playbook -i inventory playbook.yml
