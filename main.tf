@@ -1,3 +1,4 @@
+variable "public_ssh_key" {}
 resource "google_compute_instance" "vm" {
   name ="docker-vm"
   machine_type = "e2-micro"
@@ -14,6 +15,9 @@ resource "google_compute_instance" "vm" {
 
     access_config{
     }
+  }
+  metadata = {
+    ssh-keys = "ubuntu:${var.public_ssh_key}"
   }
 
 }
