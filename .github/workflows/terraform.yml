@@ -49,13 +49,10 @@ jobs:
 
     - name: Terraform Apply
       run: terraform apply -auto-approve -input=false
-    - name: Install jq
-      run: sudo apt-get update && sudo apt-get install -y jq
     - name: Get VM IP
       id: ip
       run: |
-        RAW=$(terraform output -json vm_ip)
-        IP=$(echo $RAW | jq -r '.')
+        IP=$(terraform output -raw vm_ip | tr -d '\r\n')
         echo "IP=$IP" >> $GITHUB_OUTPUT
     
     - name: Setup SSH
