@@ -85,5 +85,9 @@ jobs:
 
         echo "===== INVENTORY ====="
         cat inventory
+    - name: Add VM to known_hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ steps.ip.outputs.IP }} >> ~/.ssh/known_hosts
     - name: Run Ansible
       run: ansible-playbook -i inventory playbook.yml
