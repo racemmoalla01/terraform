@@ -49,3 +49,26 @@ jobs:
 
     - name: Terraform Apply
       run: terraform apply -auto-approve -input=false
+    - name: Get VM IP
+      id: ip
+      run: echo "IP=$(terraform output -raw vm_ip)" >> $GITHUB_OUTPUT
+
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+
+    - name: Wait for VM
+      run: sleep 30
+
+    - name: Install Ansible
+      run: sudo apt-get update && sudo apt-get install -y ansible
+
+    - name: Create inventory
+      run: |
+        echo "[vm]" > inventory
+        echo "${{ steps.ip.outputs.IP }} ansible_user=ubuntu" >> inventory
+
+    - name: Run Ansible
+      run: ansible-playbook -i inventory playbook.yml
