@@ -34,7 +34,7 @@ jobs:
         service_account: 'gitlab-terraform@project-edd33288-581c-43ae-985.iam.gserviceaccount.com'
 
     # =========================
-    # 3. TERRAFORM SETUP
+    # 3. TERRAFORM
     # =========================
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
@@ -46,24 +46,31 @@ jobs:
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. EXPORT CLEAN JSON (IMPORTANT FIX)
+    # 4. EXPORT CLEAN OUTPUT (CRITICAL FIX)
     # =========================
     - name: Export Terraform Outputs
       run: |
+        set -e
+
         terraform output -json vm_ips > vm_ips.json
+
+        echo "===== RAW OUTPUT ====="
         cat vm_ips.json
 
+        # validate JSON
+        jq . vm_ips.json > /dev/null
+
     # =========================
-    # 5. PARSE IPs PROPREMENT
+    # 5. PARSE IPS CLEANLY (NO PYTHON)
     # =========================
     - name: Parse IPs
       id: ips
       run: |
         set -e
 
-        CLEAN_IPS=$(python3 -c "import json; print('\n'.join(json.load(open('vm_ips.json'))))")
+        CLEAN_IPS=$(jq -r '.[]' vm_ips.json)
 
-        echo "CLEAN IPS:"
+        echo "===== CLEAN IPS ====="
         echo "$CLEAN_IPS"
 
         echo "IPS<<EOF" >> $GITHUB_OUTPUT
@@ -85,7 +92,7 @@ jobs:
         done <<< "${{ steps.ips.outputs.IPS }}"
 
     # =========================
-    # 7. WAIT FOR SSH (HEALTH CHECK)
+    # 7. WAIT FOR SSH
     # =========================
     - name: Wait for SSH
       run: |
@@ -112,6 +119,7 @@ jobs:
     - name: Build Inventory
       run: |
         mkdir -p inventory
+
         echo "[vm]" > inventory/hosts.ini
 
         while read ip; do
