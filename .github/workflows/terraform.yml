@@ -19,22 +19,22 @@ jobs:
     steps:
 
     # =========================
-    # 1. Checkout
+    # 1. CHECKOUT
     # =========================
     - name: Checkout
       uses: actions/checkout@v3
 
     # =========================
-    # 2. GCP Auth
+    # 2. GCP AUTH
     # =========================
     - name: Auth GCP
       uses: google-github-actions/auth@v2
       with:
-        workload_identity_provider: projects/920722724682/locations/global/workloadIdentityPools/git1/providers/github
-        service_account: gitlab-terraform@project-edd33288-581c-43ae-985.iam.gserviceaccount.com
+        workload_identity_provider: 'projects/920722724682/locations/global/workloadIdentityPools/git1/providers/github'
+        service_account: 'gitlab-terraform@project-edd33288-581c-43ae-985.iam.gserviceaccount.com'
 
     # =========================
-    # 3. Terraform Setup
+    # 3. TERRAFORM
     # =========================
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
@@ -46,91 +46,83 @@ jobs:
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. Install tools
+    # 4. GET CLEAN IPs (IMPORTANT FIX)
     # =========================
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ansible jq netcat-openbsd
-
-    # =========================
-    # 5. CLEAN Terraform output (FIX DEFINITIF)
-    # =========================
-    - name: Get VM IPs
+    - name: Extract VM IPs
       id: ips
       run: |
         set -e
 
-        echo "Extracting Terraform output..."
+        echo "Fetching Terraform outputs..."
 
-        # write clean JSON to file (IMPORTANT FIX)
-        terraform output -json vm_ips > vm_ips.json
+        IPS=$(terraform output -json vm_ips)
 
-        echo "RAW JSON:"
-        cat vm_ips.json
-
-        # extract only IPs safely
-        IPS=$(jq -r '.[]' vm_ips.json)
-
-        echo "Parsed IPs:"
         echo "$IPS"
 
-        if [ -z "$IPS" ]; then
-          echo "ERROR: No IPs found"
-          exit 1
-        fi
+        # Clean JSON → one IP per line
+        CLEAN_IPS=$(echo "$IPS" | python3 -c "import sys, json; print('\n'.join(json.load(sys.stdin)))")
 
-        {
-          echo "IPS<<EOF"
-          echo "$IPS"
-          echo "EOF"
-        } >> $GITHUB_OUTPUT
+        echo "CLEAN IPS:"
+        echo "$CLEAN_IPS"
+
+        # export multiline safe
+        echo "IPS<<EOF" >> $GITHUB_OUTPUT
+        echo "$CLEAN_IPS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
     # =========================
-    # 6. SSH Setup
+    # 5. SSH SETUP
     # =========================
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
-
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
-        echo "${{ steps.ips.outputs.IPS }}" | while read ip; do
+        while read ip; do
           ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts
-        done
+        done <<< "${{ steps.ips.outputs.IPS }}"
 
     # =========================
-    # 7. Wait for SSH (robust)
+    # 6. WAIT FOR SSH (NO SLEEP HACK)
     # =========================
     - name: Wait for SSH
       run: |
-        echo "${{ steps.ips.outputs.IPS }}" | while read ip; do
-          echo "Waiting SSH on $ip"
+        while read ip; do
+          echo "Waiting SSH on $ip..."
 
           for i in {1..30}; do
-            nc -z "$ip" 22 && echo "$ip READY" && break
+            nc -z $ip 22 && echo "$ip READY" && break
             sleep 5
           done
-        done
+        done <<< "${{ steps.ips.outputs.IPS }}"
 
     # =========================
-    # 8. Build Ansible Inventory (CLEAN)
+    # 7. INSTALL ANSIBLE
+    # =========================
+    - name: Install Ansible
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ansible
+
+    # =========================
+    # 8. BUILD CLEAN INVENTORY (FIX FINAL)
     # =========================
     - name: Build Inventory
       run: |
         mkdir -p inventory
+
         echo "[vm]" > inventory/hosts.ini
 
-        echo "${{ steps.ips.outputs.IPS }}" | while read ip; do
+        while read ip; do
           echo "$ip ansible_user=ubuntu ansible_host=$ip" >> inventory/hosts.ini
-        done
+        done <<< "${{ steps.ips.outputs.IPS }}"
 
         echo "===== INVENTORY ====="
         cat inventory/hosts.ini
 
     # =========================
-    # 9. Run Ansible
+    # 9. RUN ANSIBLE
     # =========================
     - name: Run Ansible
       run: ansible-playbook -i inventory/hosts.ini playbook.yml
