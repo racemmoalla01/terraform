@@ -1,7 +1,7 @@
 variable "public_ssh_key" {}
 
 resource "google_compute_instance" "vm" {
-  count        = 2
+  count        = 1
   name         = "docker-vm-${count.index}"
   machine_type = "e2-micro"
   project      = "920722724682"
