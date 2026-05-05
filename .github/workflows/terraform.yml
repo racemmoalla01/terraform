@@ -54,30 +54,45 @@ jobs:
         sudo apt-get install -y ansible jq netcat-openbsd
 
     # =========================
-    # 5. Extract VM IPs (CLEAN + SAFE)
+    # 5. CLEAN Terraform output (FIX DEFINITIF)
     # =========================
     - name: Get VM IPs
       id: ips
       run: |
         set -e
 
-        IPS=$(terraform output -json vm_ips | jq -r '.[]')
+        echo "Extracting Terraform output..."
+
+        # write clean JSON to file (IMPORTANT FIX)
+        terraform output -json vm_ips > vm_ips.json
+
+        echo "RAW JSON:"
+        cat vm_ips.json
+
+        # extract only IPs safely
+        IPS=$(jq -r '.[]' vm_ips.json)
+
+        echo "Parsed IPs:"
+        echo "$IPS"
 
         if [ -z "$IPS" ]; then
           echo "ERROR: No IPs found"
           exit 1
         fi
 
-        echo "IPS<<EOF" >> $GITHUB_OUTPUT
-        echo "$IPS" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        {
+          echo "IPS<<EOF"
+          echo "$IPS"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
 
     # =========================
-    # 6. SSH Setup (clean)
+    # 6. SSH Setup
     # =========================
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
+
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
@@ -86,7 +101,7 @@ jobs:
         done
 
     # =========================
-    # 7. Wait for SSH (NO sleep blind)
+    # 7. Wait for SSH (robust)
     # =========================
     - name: Wait for SSH
       run: |
@@ -100,7 +115,7 @@ jobs:
         done
 
     # =========================
-    # 8. Build Ansible inventory (CLEAN)
+    # 8. Build Ansible Inventory (CLEAN)
     # =========================
     - name: Build Inventory
       run: |
