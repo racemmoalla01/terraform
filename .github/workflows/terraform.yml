@@ -57,32 +57,31 @@ jobs:
         sudo apt-get install -y ansible
 
     # =========================
-    # 5. BUILD INVENTORY (MULTI-VM SAFE)
+    # 5. BUILD INVENTORY (FIXED MULTI-VM)
     # =========================
     - name: Build Inventory
       run: |
         set -e
 
-        echo "Fetching VM IPs..."
+        echo "Fetching Terraform output..."
 
         IPS=$(terraform output -json vm_ips)
 
-        echo "Raw output:"
+        echo "RAW OUTPUT:"
         echo "$IPS"
 
-        IP_LIST=$(echo "$IPS" | tr -d '[],"' | tr ' ' '\n' | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}')
-
-        echo "Parsed IPs:"
-        echo "$IP_LIST"
-
         mkdir -p inventory
+        echo "[vm]" > inventory/hosts.ini
 
-        {
-          echo "[vm]"
-          for ip in $IP_LIST; do
-            echo "$ip ansible_user=ubuntu ansible_host=$ip"
-          done
-        } > inventory/hosts.ini
+        echo "$IPS" \
+          | sed 's/\[//g' \
+          | sed 's/\]//g' \
+          | sed 's/"//g' \
+          | tr ',' '\n' \
+          | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+          | while read ip; do
+              echo "$ip ansible_user=ubuntu ansible_host=$ip" >> inventory/hosts.ini
+            done
 
         echo "===== INVENTORY ====="
         cat inventory/hosts.ini
@@ -97,25 +96,23 @@ jobs:
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
-        # add all hosts to known_hosts
-        for ip in $(cat inventory/hosts.ini | grep -v '\[vm\]'); do
+        while read ip; do
           ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts
-        done
+        done < <(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' inventory/hosts.ini)
 
     # =========================
-    # 7. WAIT SSH HEALTH CHECK
+    # 7. WAIT SSH
     # =========================
     - name: Wait for SSH
       run: |
-        for ip in $(cat inventory/hosts.ini | grep -v '\[vm\]'); do
+        while read ip; do
           echo "Waiting SSH on $ip..."
 
           for i in {1..30}; do
             nc -z $ip 22 && echo "$ip READY" && break
-            echo "waiting..."
             sleep 5
           done
-        done
+        done < <(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' inventory/hosts.ini)
 
     # =========================
     # 8. RUN ANSIBLE
