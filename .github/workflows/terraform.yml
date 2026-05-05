@@ -19,13 +19,13 @@ jobs:
     steps:
 
     # =========================
-    # 1. CHECKOUT CODE
+    # 1. CHECKOUT
     # =========================
     - name: Checkout
       uses: actions/checkout@v3
 
     # =========================
-    # 2. GCP AUTH (WIF)
+    # 2. AUTH GCP (WIF)
     # =========================
     - name: Auth GCP
       uses: google-github-actions/auth@v2
@@ -34,7 +34,7 @@ jobs:
         service_account: 'gitlab-terraform@project-edd33288-581c-43ae-985.iam.gserviceaccount.com'
 
     # =========================
-    # 3. TERRAFORM SETUP
+    # 3. TERRAFORM
     # =========================
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
@@ -49,36 +49,43 @@ jobs:
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. GET CLEAN IP (SINGLE SOURCE OF TRUTH)
+    # 4. GET CLEAN IP (FIX IMPORTANT)
     # =========================
     - name: Get VM IP
       id: ip
       run: |
-        IP=$(terraform output -raw vm_ip | tr -d '\r\n')
+        IP=$(terraform output -raw vm_ip | tr -d '\r\n' | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+
+        if [ -z "$IP" ]; then
+          echo "ERROR: IP not found"
+          exit 1
+        fi
+
         echo "IP=$IP" >> $GITHUB_OUTPUT
 
     - name: Debug IP
-      run: echo "VM IP = ${{ steps.ip.outputs.IP }}"
+      run: echo "VM IP = '${{ steps.ip.outputs.IP }}'"
 
     # =========================
-    # 5. SSH SETUP
+    # 5. SSH SETUP (FIXED)
     # =========================
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
+
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
-        ssh-keyscan -H ${{ steps.ip.outputs.IP }} >> ~/.ssh/known_hosts
+        ssh-keyscan -H "${{ steps.ip.outputs.IP }}" >> ~/.ssh/known_hosts
 
     # =========================
-    # 6. WAIT FOR SSH (HEALTH CHECK)
+    # 6. WAIT SSH (HEALTH CHECK)
     # =========================
     - name: Wait for SSH
       run: |
         IP=${{ steps.ip.outputs.IP }}
 
-        echo "Waiting for SSH on $IP..."
+        echo "Waiting SSH on $IP..."
 
         for i in {1..30}; do
           nc -z $IP 22 && echo "SSH READY" && exit 0
@@ -86,7 +93,8 @@ jobs:
           sleep 5
         done
 
-        echo "SSH not ready" && exit 1
+        echo "SSH not ready"
+        exit 1
 
     # =========================
     # 7. INSTALL ANSIBLE
@@ -97,7 +105,7 @@ jobs:
         sudo apt-get install -y ansible
 
     # =========================
-    # 8. CREATE CLEAN INVENTORY
+    # 8. INVENTORY (FIXED SAFE)
     # =========================
     - name: Build Inventory
       run: |
@@ -105,10 +113,7 @@ jobs:
 
         mkdir -p inventory
 
-        cat <<EOF > inventory/hosts.ini
-        [vm]
-        $IP ansible_user=ubuntu ansible_host=$IP
-        EOF
+        printf "[vm]\n%s ansible_user=ubuntu ansible_host=%s\n" "$IP" "$IP" > inventory/hosts.ini
 
         echo "===== INVENTORY ====="
         cat inventory/hosts.ini
