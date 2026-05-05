@@ -42,78 +42,79 @@ jobs:
     - name: Terraform Init
       run: terraform init
 
-    - name: Terraform Plan
-      run: terraform plan -input=false
-
     - name: Terraform Apply
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. INSTALL ANSIBLE
+    # 4. INSTALL TOOLS
     # =========================
-    - name: Install Ansible
+    - name: Install Ansible + Netcat
       run: |
         sudo apt-get update
-        sudo apt-get install -y ansible
+        sudo apt-get install -y ansible netcat-openbsd
 
     # =========================
-    # 5. BUILD CLEAN INVENTORY (FIX FINAL)
+    # 5. BUILD CLEAN INVENTORY (MULTI-VM SAFE)
     # =========================
     - name: Build Inventory
+      id: inventory
       run: |
         set -e
 
-        echo "Fetching Terraform VM IPs..."
+        echo "Fetching Terraform IPs..."
 
-        # FORCE CLEAN OUTPUT ONLY
-        IPS=$(terraform output -json vm_ips 2>/dev/null | tail -n 1)
+        # STRICT CLEAN OUTPUT (NO DEBUG TRASH)
+        IPS=$(terraform output -json vm_ips | tr -d '\r\n')
 
-        echo "RAW CLEAN OUTPUT:"
+        echo "RAW IPS:"
         echo "$IPS"
 
+        # Create clean inventory
         mkdir -p inventory
         echo "[vm]" > inventory/hosts.ini
 
         echo "$IPS" \
-          | sed 's/\[//g' \
-          | sed 's/\]//g' \
-          | sed 's/"//g' \
+          | tr -d '[]"' \
           | tr ',' '\n' \
-          | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+          | sed '/^$/d' \
           | while read ip; do
               echo "$ip ansible_user=ubuntu ansible_host=$ip" >> inventory/hosts.ini
             done
 
-        echo "===== FINAL INVENTORY ====="
+        echo "===== INVENTORY ====="
         cat inventory/hosts.ini
 
     # =========================
-    # 6. SSH SETUP
+    # 6. SSH KEY SETUP (SAFE MULTI HOST)
     # =========================
     - name: Setup SSH
       run: |
-        mkdir -p ~/.ssh
+        set -e
 
+        mkdir -p ~/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
-        while read ip; do
+        # add all hosts cleanly
+        grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' inventory/hosts.ini | while read ip; do
           ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts
-        done < <(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' inventory/hosts.ini)
+        done
 
     # =========================
-    # 7. WAIT FOR SSH
+    # 7. WAIT FOR SSH (HEALTH CHECK)
     # =========================
     - name: Wait for SSH
       run: |
-        while read ip; do
+        set -e
+
+        grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' inventory/hosts.ini | while read ip; do
           echo "Waiting SSH on $ip..."
 
           for i in {1..30}; do
             nc -z $ip 22 && echo "$ip READY" && break
             sleep 5
           done
-        done < <(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' inventory/hosts.ini)
+        done
 
     # =========================
     # 8. RUN ANSIBLE
