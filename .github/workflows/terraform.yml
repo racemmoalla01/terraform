@@ -1,28 +1,22 @@
 name: Terraform + Ansible CI/CD
-
 on:
   push:
     branches: ["main"]
   pull_request:
-
 permissions:
   contents: read
   id-token: write
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
       TF_VAR_public_ssh_key: ${{ secrets.SSH_PUBLIC_KEY }}
-
     steps:
-
     # =========================
     # 1. CHECKOUT
     # =========================
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     # =========================
     # 2. GCP AUTH
@@ -37,7 +31,9 @@ jobs:
     # 3. TERRAFORM
     # =========================
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v1
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_wrapper: false   # ← CRITIQUE : désactive le wrapper qui pollue stdout
 
     - name: Terraform Init
       run: terraform init
@@ -46,36 +42,31 @@ jobs:
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. EXPORT CLEAN OUTPUT (CRITICAL FIX)
+    # 4. EXPORT CLEAN OUTPUT
     # =========================
     - name: Export Terraform Outputs
       run: |
         set -e
-
         terraform output -json vm_ips > vm_ips.json
-
         echo "===== RAW OUTPUT ====="
         cat vm_ips.json
-
-        # validate JSON
-        jq . vm_ips.json > /dev/null
+        jq . vm_ips.json > /dev/null   # validate JSON
 
     # =========================
-    # 5. PARSE IPS CLEANLY (NO PYTHON)
+    # 5. PARSE IPS
     # =========================
     - name: Parse IPs
       id: ips
       run: |
         set -e
-
         CLEAN_IPS=$(jq -r '.[]' vm_ips.json)
-
         echo "===== CLEAN IPS ====="
         echo "$CLEAN_IPS"
-
-        echo "IPS<<EOF" >> $GITHUB_OUTPUT
-        echo "$CLEAN_IPS" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        {
+          echo "IPS<<EOF"
+          echo "$CLEAN_IPS"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     # =========================
     # 6. SSH SETUP
@@ -83,11 +74,9 @@ jobs:
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
-
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-
-        while read ip; do
+        while read -r ip; do
           ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts
         done <<< "${{ steps.ips.outputs.IPS }}"
 
@@ -96,11 +85,10 @@ jobs:
     # =========================
     - name: Wait for SSH
       run: |
-        while read ip; do
+        while read -r ip; do
           echo "Waiting SSH on $ip..."
-
           for i in {1..30}; do
-            nc -z $ip 22 && echo "$ip READY" && break
+            nc -z "$ip" 22 && echo "$ip READY" && break
             sleep 5
           done
         done <<< "${{ steps.ips.outputs.IPS }}"
@@ -110,7 +98,7 @@ jobs:
     # =========================
     - name: Install Ansible
       run: |
-        sudo apt-get update
+        sudo apt-get update -qq
         sudo apt-get install -y ansible
 
     # =========================
@@ -119,13 +107,10 @@ jobs:
     - name: Build Inventory
       run: |
         mkdir -p inventory
-
         echo "[vm]" > inventory/hosts.ini
-
-        while read ip; do
+        while read -r ip; do
           echo "$ip ansible_user=ubuntu ansible_host=$ip" >> inventory/hosts.ini
         done <<< "${{ steps.ips.outputs.IPS }}"
-
         echo "===== INVENTORY ====="
         cat inventory/hosts.ini
 
