@@ -34,7 +34,7 @@ jobs:
         service_account: 'gitlab-terraform@project-edd33288-581c-43ae-985.iam.gserviceaccount.com'
 
     # =========================
-    # 3. TERRAFORM
+    # 3. TERRAFORM SETUP
     # =========================
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
@@ -46,36 +46,37 @@ jobs:
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. GET CLEAN IPs (IMPORTANT FIX)
+    # 4. EXPORT CLEAN JSON (IMPORTANT FIX)
     # =========================
-    - name: Extract VM IPs
+    - name: Export Terraform Outputs
+      run: |
+        terraform output -json vm_ips > vm_ips.json
+        cat vm_ips.json
+
+    # =========================
+    # 5. PARSE IPs PROPREMENT
+    # =========================
+    - name: Parse IPs
       id: ips
       run: |
         set -e
 
-        echo "Fetching Terraform outputs..."
-
-        IPS=$(terraform output -json vm_ips)
-
-        echo "$IPS"
-
-        # Clean JSON → one IP per line
-        CLEAN_IPS=$(echo "$IPS" | python3 -c "import sys, json; print('\n'.join(json.load(sys.stdin)))")
+        CLEAN_IPS=$(python3 -c "import json; print('\n'.join(json.load(open('vm_ips.json'))))")
 
         echo "CLEAN IPS:"
         echo "$CLEAN_IPS"
 
-        # export multiline safe
         echo "IPS<<EOF" >> $GITHUB_OUTPUT
         echo "$CLEAN_IPS" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
     # =========================
-    # 5. SSH SETUP
+    # 6. SSH SETUP
     # =========================
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
+
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
@@ -84,7 +85,7 @@ jobs:
         done <<< "${{ steps.ips.outputs.IPS }}"
 
     # =========================
-    # 6. WAIT FOR SSH (NO SLEEP HACK)
+    # 7. WAIT FOR SSH (HEALTH CHECK)
     # =========================
     - name: Wait for SSH
       run: |
@@ -98,7 +99,7 @@ jobs:
         done <<< "${{ steps.ips.outputs.IPS }}"
 
     # =========================
-    # 7. INSTALL ANSIBLE
+    # 8. INSTALL ANSIBLE
     # =========================
     - name: Install Ansible
       run: |
@@ -106,12 +107,11 @@ jobs:
         sudo apt-get install -y ansible
 
     # =========================
-    # 8. BUILD CLEAN INVENTORY (FIX FINAL)
+    # 9. BUILD CLEAN INVENTORY
     # =========================
     - name: Build Inventory
       run: |
         mkdir -p inventory
-
         echo "[vm]" > inventory/hosts.ini
 
         while read ip; do
@@ -122,7 +122,7 @@ jobs:
         cat inventory/hosts.ini
 
     # =========================
-    # 9. RUN ANSIBLE
+    # 10. RUN ANSIBLE
     # =========================
     - name: Run Ansible
       run: ansible-playbook -i inventory/hosts.ini playbook.yml
