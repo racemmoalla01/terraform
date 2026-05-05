@@ -49,61 +49,7 @@ jobs:
       run: terraform apply -auto-approve -input=false
 
     # =========================
-    # 4. GET CLEAN IP (ROBUST)
-    # =========================
-    - name: Get VM IP
-      id: ip
-      run: |
-        set -e
-
-        IP=$(terraform output -raw vm_ip | tr -d '\r\n' | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)
-
-        echo "Extracted IP = $IP"
-
-        if [ -z "$IP" ]; then
-          echo "ERROR: IP not found"
-          exit 1
-        fi
-
-        echo "IP<<EOF" >> $GITHUB_OUTPUT
-        echo "$IP" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-    - name: Debug IP
-      run: echo "VM IP = ${{ steps.ip.outputs.IP }}"
-
-    # =========================
-    # 5. SSH SETUP
-    # =========================
-    - name: Setup SSH
-      run: |
-        mkdir -p ~/.ssh
-
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-
-        ssh-keyscan -H "${{ steps.ip.outputs.IP }}" >> ~/.ssh/known_hosts
-
-    # =========================
-    # 6. WAIT SSH (HEALTH CHECK)
-    # =========================
-    - name: Wait for SSH
-      run: |
-        IP=${{ steps.ip.outputs.IP }}
-
-        echo "Waiting SSH on $IP..."
-
-        for i in {1..30}; do
-          nc -z $IP 22 && echo "SSH READY" && exit 0
-          echo "waiting..."
-          sleep 5
-        done
-
-        echo "SSH not ready"
-        exit 1
-
-    # =========================
-    # 7. INSTALL ANSIBLE
+    # 4. INSTALL ANSIBLE
     # =========================
     - name: Install Ansible
       run: |
@@ -111,25 +57,26 @@ jobs:
         sudo apt-get install -y ansible
 
     # =========================
-    # 8. INVENTORY (CLEAN + SAFE)
+    # 5. BUILD INVENTORY (MULTI-VM SAFE)
     # =========================
-    - name: Get VM IPs
-      id: ip
+    - name: Build Inventory
       run: |
         set -e
 
-        echo "=== TERRAFORM OUTPUT JSON ==="
+        echo "Fetching VM IPs..."
+
         IPS=$(terraform output -json vm_ips)
 
-        echo "Raw IPs: $IPS"
+        echo "Raw output:"
+        echo "$IPS"
 
-        # extraire proprement sans jq (bash only)
         IP_LIST=$(echo "$IPS" | tr -d '[],"' | tr ' ' '\n' | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}')
 
         echo "Parsed IPs:"
         echo "$IP_LIST"
 
-        # export format Ansible inventory
+        mkdir -p inventory
+
         {
           echo "[vm]"
           for ip in $IP_LIST; do
@@ -141,7 +88,37 @@ jobs:
         cat inventory/hosts.ini
 
     # =========================
-    # 9. RUN ANSIBLE
+    # 6. SSH SETUP
+    # =========================
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+
+        # add all hosts to known_hosts
+        for ip in $(cat inventory/hosts.ini | grep -v '\[vm\]'); do
+          ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts
+        done
+
+    # =========================
+    # 7. WAIT SSH HEALTH CHECK
+    # =========================
+    - name: Wait for SSH
+      run: |
+        for ip in $(cat inventory/hosts.ini | grep -v '\[vm\]'); do
+          echo "Waiting SSH on $ip..."
+
+          for i in {1..30}; do
+            nc -z $ip 22 && echo "$ip READY" && break
+            echo "waiting..."
+            sleep 5
+          done
+        done
+
+    # =========================
+    # 8. RUN ANSIBLE
     # =========================
     - name: Run Ansible
       run: ansible-playbook -i inventory/hosts.ini playbook.yml
