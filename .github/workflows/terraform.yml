@@ -106,9 +106,9 @@ jobs:
         mkdir -p inventory
 
         cat <<EOF > inventory/hosts.ini
-[vm]
-$IP ansible_user=ubuntu ansible_host=$IP
-EOF
+        [vm]
+        $IP ansible_user=ubuntu ansible_host=$IP
+        EOF
 
         echo "===== INVENTORY ====="
         cat inventory/hosts.ini
